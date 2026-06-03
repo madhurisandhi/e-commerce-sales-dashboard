@@ -1,0 +1,110 @@
+import pandas as pd
+import numpy as np
+import os
+
+# ─────────────────────────────────────────────
+# E-Commerce Sales Dashboard
+#  Data Cleaning & Pipeline
+# ─────────────────────────────────────────────
+
+def load_data(filepath):
+    """Load raw sales CSV."""
+    df = pd.read_csv(filepath, parse_dates=["order_date", "ship_date"])
+    print(f"Loaded {len(df):,} rows × {df.shape[1]} columns")
+    return df
+
+
+def clean_data(df):
+    """Full cleaning pipeline — handles nulls, types, duplicates, outliers."""
+
+    print("\n── Step 1: Duplicates ──")
+    before = len(df)
+    df = df.drop_duplicates(subset="order_id")
+    print(f"Removed {before - len(df)} duplicate rows")
+
+    print("\n── Step 2: Missing Values ──")
+    print(df.isnull().sum()[df.isnull().sum() > 0])
+    df["customer_name"].fillna("Unknown", inplace=True)
+    df["region"].fillna(df["region"].mode()[0], inplace=True)
+    df.dropna(subset=["sales", "order_date"], inplace=True)
+
+    print("\n── Step 3: Data Types ──")
+    df["sales"] = pd.to_numeric(df["sales"], errors="coerce")
+    df["quantity"] = pd.to_numeric(df["quantity"], errors="coerce").astype("Int64")
+    df["profit"] = pd.to_numeric(df["profit"], errors="coerce")
+
+    print("\n── Step 4: Derived Columns ──")
+    df["year"] = df["order_date"].dt.year
+    df["month"] = df["order_date"].dt.month
+    df["month_name"] = df["order_date"].dt.strftime("%b")
+    df["quarter"] = df["order_date"].dt.to_period("Q").astype(str)
+    df["days_to_ship"] = (df["ship_date"] - df["order_date"]).dt.days
+    df["profit_margin"] = (df["profit"] / df["sales"]).round(4)
+
+    print("\n── Step 5: Outlier Removal (IQR) ──")
+    Q1 = df["sales"].quantile(0.01)
+    Q3 = df["sales"].quantile(0.99)
+    before = len(df)
+    df = df[(df["sales"] >= Q1) & (df["sales"] <= Q3)]
+    print(f"Removed {before - len(df)} outlier rows from 'sales'")
+
+    print(f"\nCleaned dataset: {len(df):,} rows")
+    return df
+
+
+def save_data(df, output_path):
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    df.to_csv(output_path, index=False)
+    print(f"\nSaved cleaned data → {output_path}")
+
+
+def generate_sample_data(n=500):
+    """Generate realistic sample sales data for demo purposes."""
+    np.random.seed(42)
+    categories = ["Electronics", "Clothing", "Home & Garden", "Books", "Sports"]
+    regions = ["West", "East", "Central", "South"]
+    segments = ["Consumer", "Corporate", "Home Office"]
+
+    order_dates = pd.date_range("2022-01-01", "2023-12-31", periods=n)
+    ship_lag = np.random.randint(1, 8, n)
+
+    df = pd.DataFrame({
+        "order_id": [f"ORD-{1000+i}" for i in range(n)],
+        "order_date": order_dates,
+        "ship_date": order_dates + pd.to_timedelta(ship_lag, unit="D"),
+        "customer_id": [f"CUST-{np.random.randint(100, 400)}" for _ in range(n)],
+        "customer_name": [f"Customer {np.random.randint(1, 200)}" for _ in range(n)],
+        "segment": np.random.choice(segments, n),
+        "region": np.random.choice(regions, n),
+        "category": np.random.choice(categories, n),
+        "product_name": [f"Product {np.random.randint(1, 100)}" for _ in range(n)],
+        "sales": np.round(np.random.lognormal(4.5, 1.2, n), 2),
+        "quantity": np.random.randint(1, 10, n),
+        "discount": np.round(np.random.choice([0, 0.1, 0.2, 0.3], n), 2),
+        "profit": None  # will compute below
+    })
+    df["profit"] = np.round(df["sales"] * np.random.uniform(0.05, 0.4, n), 2)
+
+    # Inject some nulls and duplicates for cleaning demo
+    df.loc[np.random.choice(df.index, 10), "customer_name"] = np.nan
+    df.loc[np.random.choice(df.index, 5), "region"] = np.nan
+    df = pd.concat([df, df.sample(8)], ignore_index=True)  # duplicates
+
+    return df
+
+
+if __name__ == "__main__":
+    print("=" * 50)
+    print("E-Commerce Sales — Data Cleaning Pipeline")
+    print("=" * 50)
+
+    # Generate sample data (replace with: df = load_data("data/raw/sales.csv"))
+    df_raw = generate_sample_data(500)
+    print(f"\nRaw data shape: {df_raw.shape}")
+
+    df_clean = clean_data(df_raw)
+    save_data(df_clean, "data/cleaned/sales_clean.csv")
+
+    print("\n── Preview ──")
+    print(df_clean[["order_id", "order_date", "category", "region",
+                     "sales", "profit", "profit_margin", "days_to_ship"]].head(8).to_string(index=False))
